@@ -1,46 +1,42 @@
 package com.vlkan.fibertest;
 
 import kilim.Pausable;
+import kilim.PauseReason;
+import kilim.Scheduler;
 import kilim.Task;
 import kilim.tools.Kilim;
 import org.openjdk.jmh.annotations.Benchmark;
 
 /**
- * Ring benchmark using Kilim actors.
+ * Ring benchmark using Kilim tasks and via pause and resume.
  */
 public class KilimFiberRingBenchmark extends AbstractRingBenchmark {
+    static { Scheduler.defaultNumberThreads = 1; }
+    static PauseReason always = t -> true;
 
     public static class InternalFiber extends Task<Integer> {
-
-        private final int id;
-
+        private final int sid;
         private final int[] sequences;
-
         private InternalFiber next;
-
-        private volatile boolean waiting = true;
-
         private int sequence;
 
         private InternalFiber(int id, int[] sequences) {
-            this.id = id;
+            this.sid = id;
             this.sequences = sequences;
+            setScheduler(Scheduler.getDefaultScheduler());
         }
 
         @Override
         public void execute() throws Pausable {
-            do {
-                while (waiting) {
-                    pause(getPauseReason());
-                }
-                waiting = true;
+            while (true) {
                 next.sequence = sequence - 1;
-                next.waiting = false;
                 next.resume();
-            } while (sequence > 0);
-            sequences[id] = sequence;
+                if (sequence <= 0)
+                    break;
+                Task.pause(always);
+            }
+            sequences[sid] = sequence;
         }
-
     }
 
     @Override
@@ -59,19 +55,15 @@ public class KilimFiberRingBenchmark extends AbstractRingBenchmark {
             fibers[workerIndex].next = fibers[(workerIndex + 1) % workerCount];
         }
 
-        // Start fibers.
-        for (InternalFiber fiber : fibers) {
-            fiber.start();
-        }
-
         // Initiate the ring.
         InternalFiber firstFiber = fibers[0];
         firstFiber.sequence = ringSize;
-        firstFiber.waiting = false;
         firstFiber.resume();
 
-        // Wait for workers to complete.
-        Task.idledown();
+        for (int ii=0; ii < workerCount; ii++)
+            fibers[ii].joinb();
+
+        Scheduler.getDefaultScheduler().shutdown();
         return sequences;
 
     }
