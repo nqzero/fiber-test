@@ -10,6 +10,10 @@ public class KilimFiberRingBenchmarkTest {
         KilimFiberRingBenchmark benchmark = new KilimFiberRingBenchmark();
         int[] sequences = benchmark.ringBenchmark();
         Util.testRingBenchmark(benchmark.workerCount, benchmark.ringSize, sequences);
+        Util.testRingBenchmark(benchmark.workerCount, benchmark.ringSize,
+                new KilimActorRingBenchmark().ringBenchmark());
+        Util.testRingBenchmark(benchmark.workerCount, benchmark.ringSize,
+                new KilimContinuationRingBenchmark().ringBenchmark());
     }
 
     @Test
