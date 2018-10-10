@@ -18,12 +18,17 @@ public class KilimContinuationRingBenchmark extends AbstractRingBenchmark {
         for (Continuation cc; ((cc = queue.pollFirst()) != null); )
             cc.run();
     }
+    static void resume(InternalFiber task) {
+        if (! task.done)
+            queue.add(task);
+    }
     
     public static class InternalFiber extends Continuation {
         private final int sid;
         private final int[] sequences;
         private InternalFiber next;
         private int sequence;
+        private boolean done;
         
 
         private InternalFiber(int id, int[] sequences) {
@@ -33,11 +38,14 @@ public class KilimContinuationRingBenchmark extends AbstractRingBenchmark {
 
         @Override
         public void execute() throws Pausable {
-            do {
-                Fiber.yield();
+            while (true) {
                 next.sequence = sequence - 1;
-                queue.add(next);
-            } while (sequence > 0);
+                resume(next);
+                if (sequence <= 0)
+                    break;
+                Fiber.yield();
+            }
+            done = true;
             sequences[sid] = sequence;
         }
     }
@@ -58,15 +66,10 @@ public class KilimContinuationRingBenchmark extends AbstractRingBenchmark {
             fibers[workerIndex].next = fibers[(workerIndex + 1) % workerCount];
         }
 
-        // Start fibers.
-        for (InternalFiber fiber : fibers) {
-            fiber.run();
-        }
-
         // Initiate the ring.
         InternalFiber firstFiber = fibers[0];
         firstFiber.sequence = ringSize;
-        queue.add(firstFiber);
+        resume(firstFiber);
         
         scheduler();
 
