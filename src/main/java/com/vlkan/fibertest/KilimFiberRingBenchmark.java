@@ -2,7 +2,6 @@ package com.vlkan.fibertest;
 
 import kilim.Pausable;
 import kilim.PauseReason;
-import kilim.Scheduler;
 import kilim.Task;
 import kilim.tools.Kilim;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -11,7 +10,6 @@ import org.openjdk.jmh.annotations.Benchmark;
  * Ring benchmark using Kilim tasks and via pause and resume.
  */
 public class KilimFiberRingBenchmark extends AbstractRingBenchmark {
-    static { Scheduler.defaultNumberThreads = 1; }
     static PauseReason always = t -> true;
 
     public static class InternalFiber extends Task<Integer> {
@@ -19,26 +17,37 @@ public class KilimFiberRingBenchmark extends AbstractRingBenchmark {
         private final int[] sequences;
         private InternalFiber next;
         private int sequence;
+        private volatile boolean rung;
 
         private InternalFiber(int id, int[] sequences) {
             this.sid = id;
             this.sequences = sequences;
-            setScheduler(Scheduler.getDefaultScheduler());
+            setScheduler(KilimForkJoin.sched);
         }
 
         @Override
         public void execute() throws Pausable {
             while (true) {
                 next.sequence = sequence - 1;
-                next.resume();
                 if (sequence <= 0)
+                    rung = true;
+                if (! next.rung) next.schedule();
+                if (rung)
                     break;
                 Task.pause(always);
             }
             sequences[sid] = sequence;
         }
+        void schedule() {
+            if (! done)
+                while (! resume())
+                    try { nretry++; Thread.sleep(0); } catch (InterruptedException ex) {}
+        }
     }
 
+    static int nretry;
+    
+    
     @Override
     @Benchmark
     public int[] ringBenchmark() {
@@ -58,23 +67,22 @@ public class KilimFiberRingBenchmark extends AbstractRingBenchmark {
         // Initiate the ring.
         InternalFiber firstFiber = fibers[0];
         firstFiber.sequence = ringSize;
-        firstFiber.resume();
+        firstFiber.schedule();
 
         for (int ii=0; ii < workerCount; ii++)
             fibers[ii].joinb();
 
-        Scheduler.getDefaultScheduler().shutdown();
         return sequences;
 
     }
 
-    @SuppressWarnings("unused")     // entrance for Kilim.run()
-    public static void kilimEntrace(String[] ignored) {
-        new KilimFiberRingBenchmark().ringBenchmark();
-    }
-
-    public static void main(String[] args) throws Exception {
-        Kilim.run("com.vlkan.fibertest.KilimFiberRingBenchmark", "kilimEntrace", args);
+    // allow trampoline detection
+    static void dummy() throws Pausable {}    
+    
+    public static void main(String[] args) {
+        if (Kilim.trampoline(true,args)) return;
+        int [] seqs = new KilimFiberRingBenchmark().ringBenchmark();
+        System.out.format("seq: %5d, retry: %5d\n",seqs[0],nretry);
     }
 
 }
