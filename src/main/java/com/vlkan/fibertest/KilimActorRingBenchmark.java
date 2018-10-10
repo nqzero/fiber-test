@@ -35,6 +35,9 @@ public class KilimActorRingBenchmark extends AbstractRingBenchmark {
             } while (sequence > 0);
             sequences[sid] = sequence;
         }
+        void awaitb() {
+            if (! done) joinb();
+        }
     }
 
     @Override
@@ -63,7 +66,7 @@ public class KilimActorRingBenchmark extends AbstractRingBenchmark {
         firstFiber.box.putnb(ringSize);
         
         for (int ii=0; ii < workerCount; ii++)
-            fibers[ii].joinb();
+            fibers[ii].awaitb();
 
         Task.idledown();
         return sequences;

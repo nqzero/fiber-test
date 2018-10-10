@@ -42,14 +42,13 @@ public class KilimContinuationRingBenchmark extends AbstractRingBenchmark {
         public void execute() throws Pausable {
             while (true) {
                 next.sequence = sequence - 1;
-                if (sequence <= 0)
-                    done = true;
                 resume(next);
-                if (done)
+                if (sequence <= 0)
                     break;
                 Fiber.yield();
             }
             sequences[sid] = sequence;
+            done = true;
         }
 
         public boolean run() throws NotPausable {

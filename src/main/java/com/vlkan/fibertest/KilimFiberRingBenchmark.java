@@ -17,7 +17,6 @@ public class KilimFiberRingBenchmark extends AbstractRingBenchmark {
         private final int[] sequences;
         private InternalFiber next;
         private int sequence;
-        private volatile boolean rung;
 
         private InternalFiber(int id, int[] sequences) {
             this.sid = id;
@@ -29,19 +28,16 @@ public class KilimFiberRingBenchmark extends AbstractRingBenchmark {
         public void execute() throws Pausable {
             while (true) {
                 next.sequence = sequence - 1;
+                next.schedule();
                 if (sequence <= 0)
-                    rung = true;
-                if (! next.rung) next.schedule();
-                if (rung)
                     break;
                 Task.pause(always);
             }
             sequences[sid] = sequence;
         }
         void schedule() {
-            if (! done)
-                while (! resume())
-                    try { nretry++; Thread.sleep(0); } catch (InterruptedException ex) {}
+            while (! done && ! resume())
+                try { nretry++; Thread.sleep(0); } catch (InterruptedException ex) {}
         }
     }
 
