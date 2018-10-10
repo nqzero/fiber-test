@@ -80,6 +80,17 @@ QuasarDataflowRingBenchmark.ringBenchmark     avgt    4  1866.151 ±  302.077  m
 QuasarFiberRingBenchmark.ringBenchmark        avgt    4   666.120 ±  148.967  ms/op
 ```
 
+
+Kilim ForkJoinPool-based and Thrash variants:
+```
+Benchmark                                     Mode  Cnt     Score      Error  Units
+KilimFiberRingBenchmark.ringBenchmark         avgt    4   330.078 ±   58.794  ms/op
+KilimContinuationRingBenchmark.ringBenchmark  avgt    4   242.965 ±   52.202  ms/op
+KilimActorRingBenchmark.ringBenchmark         avgt    4   539.025 ±  416.951  ms/op
+KilimThrashRingBenchmark.ringBenchmark        avgt    4   269.039 ±  229.924  ms/op
+```
+
+
 License
 -------
 
