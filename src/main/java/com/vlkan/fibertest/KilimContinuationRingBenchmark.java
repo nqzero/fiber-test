@@ -1,8 +1,10 @@
 package com.vlkan.fibertest;
 
-import java.util.LinkedList;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 import kilim.Continuation;
 import kilim.Fiber;
+import kilim.NotPausable;
 import kilim.Pausable;
 import kilim.tools.Kilim;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -12,15 +14,14 @@ import org.openjdk.jmh.annotations.Benchmark;
  */
 public class KilimContinuationRingBenchmark extends AbstractRingBenchmark {
 
-    static LinkedList<Continuation> queue = new LinkedList();
-
-    static void scheduler() {
-        for (Continuation cc; ((cc = queue.pollFirst()) != null); )
-            cc.run();
-    }
+    static BlockingQueue<InternalFiber> done = new LinkedBlockingQueue();
+    
+    static int nretry;
     static void resume(InternalFiber task) {
+        while (! task.ready)
+            try { nretry++; Thread.sleep(0); } catch (InterruptedException ex) {}
         if (! task.done)
-            queue.add(task);
+            KilimForkJoin.sched.schedule(task,done::add);
     }
     
     public static class InternalFiber extends Continuation {
@@ -29,6 +30,7 @@ public class KilimContinuationRingBenchmark extends AbstractRingBenchmark {
         private InternalFiber next;
         private int sequence;
         private boolean done;
+        private volatile boolean ready = true;
         
 
         private InternalFiber(int id, int[] sequences) {
@@ -40,14 +42,23 @@ public class KilimContinuationRingBenchmark extends AbstractRingBenchmark {
         public void execute() throws Pausable {
             while (true) {
                 next.sequence = sequence - 1;
-                resume(next);
                 if (sequence <= 0)
+                    done = true;
+                resume(next);
+                if (done)
                     break;
                 Fiber.yield();
             }
-            done = true;
             sequences[sid] = sequence;
         }
+
+        public boolean run() throws NotPausable {
+            ready = false;
+            boolean ret = super.run();
+            ready = true;
+            return ret;
+        }
+        
     }
 
     @Override
@@ -70,8 +81,11 @@ public class KilimContinuationRingBenchmark extends AbstractRingBenchmark {
         InternalFiber firstFiber = fibers[0];
         firstFiber.sequence = ringSize;
         resume(firstFiber);
-        
-        scheduler();
+        try {
+            for (int ii=0; ii < workerCount; ii++)
+                done.take();
+        }
+        catch (InterruptedException ex) {}
 
         return sequences;
 
@@ -80,6 +94,7 @@ public class KilimContinuationRingBenchmark extends AbstractRingBenchmark {
     public static void main(String[] args) {
         if (Kilim.trampoline(true,args)) return;
         int [] seqs = new KilimContinuationRingBenchmark().ringBenchmark();
+        System.out.format("seq: %5d, retry: %5d\n",seqs[0],nretry);
     }
 
 
