@@ -24,6 +24,7 @@ public class KilimActorRingBenchmark extends AbstractRingBenchmark {
         private InternalFiber(int id, int[] sequences) {
             this.sid = id;
             this.sequences = sequences;
+            setScheduler(KilimForkJoin.sched);
         }
 
         @Override
@@ -60,15 +61,22 @@ public class KilimActorRingBenchmark extends AbstractRingBenchmark {
         // Initiate the ring.
         InternalFiber firstFiber = fibers[0];
         firstFiber.box.putnb(ringSize);
+        
+        for (int ii=0; ii < workerCount; ii++)
+            fibers[ii].joinb();
 
         Task.idledown();
         return sequences;
 
     }
-    
+
+    // allow trampoline detection
+    static void dummy() throws Pausable {}    
+
     public static void main(String[] args) {
         if (Kilim.trampoline(true,args)) return;
-        new KilimActorRingBenchmark().ringBenchmark();
+        int [] seqs = new KilimActorRingBenchmark().ringBenchmark();
+        System.out.println("seq: " + seqs[0]);
     }
 
 
