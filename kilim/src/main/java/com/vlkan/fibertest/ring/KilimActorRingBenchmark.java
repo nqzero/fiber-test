@@ -1,6 +1,7 @@
 package com.vlkan.fibertest.ring;
 
 import kilim.Cell;
+import kilim.ForkJoinScheduler;
 import kilim.Pausable;
 import kilim.Scheduler;
 import kilim.Task;
@@ -16,9 +17,6 @@ import static com.vlkan.fibertest.ring.RingBenchmarkConfig.WORKER_COUNT;
  */
 public class KilimActorRingBenchmark implements RingBenchmark {
 
-    static {
-        Scheduler.defaultNumberThreads = THREAD_COUNT;
-    }
 
     private static class Worker extends Task<Integer> {
 
@@ -30,11 +28,12 @@ public class KilimActorRingBenchmark implements RingBenchmark {
 
         private int sequence;
 
-        private Cell<Integer> box = new Cell<>();
+        private Cell<Integer> box = new Cell();
 
-        private Worker(int id, int[] sequences) {
+        private Worker(int id, int[] sequences, Scheduler sched) {
             this._id = id;
             this.sequences = sequences;
+            setScheduler(sched);
         }
 
         @Override
@@ -45,18 +44,21 @@ public class KilimActorRingBenchmark implements RingBenchmark {
             } while (sequence > 0);
             sequences[_id] = sequence;
         }
-
+        void awaitb() {
+            if (! done) joinb();
+        }
     }
 
     @Override
     @Benchmark
     public int[] ringBenchmark() {
+        setup();
 
         // Create workers.
         int[] sequences = new int[WORKER_COUNT];
         Worker[] workers = new Worker[WORKER_COUNT];
         for (int workerIndex = 0; workerIndex < WORKER_COUNT; workerIndex++) {
-            workers[workerIndex] = new Worker(workerIndex, sequences);
+            workers[workerIndex] = new Worker(workerIndex, sequences, sched);
         }
 
         // Set next worker pointers.
@@ -74,16 +76,44 @@ public class KilimActorRingBenchmark implements RingBenchmark {
         firstWorker.box.putnb(MESSAGE_PASSING_COUNT);
 
         // Wait for scheduler to finish and shut it down.
-        Task.idledown();
+        workers[WORKER_COUNT-1].awaitb();
+        for (int ii=0; ii < WORKER_COUNT; ii++)
+            workers[ii].awaitb();
 
         // Return populated sequences.
         return sequences;
 
     }
 
+    static Scheduler affine;
+    Scheduler sched;
+    void setup() {
+        if (sched==null) {
+            if (affine==null)
+                affine = Scheduler.make(THREAD_COUNT);
+            sched = affine;
+        }
+    }
+    
+    public static class Fork extends KilimFiberRingBenchmark {
+        static Scheduler fork = new ForkJoinScheduler(THREAD_COUNT);
+        { sched = fork; }
+    }
+    
+
     @SuppressWarnings("unused")     // entrance for Kilim.run()
-    public static void kilimEntrace(String[] ignored) {
-        new KilimActorRingBenchmark().ringBenchmark();
+    public static void kilimEntrace(String[] args) throws Exception {
+        if (Kilim.trampoline(true,args)) return;
+        int num = 1;
+        if (args.length > 0) num = Integer.parseInt(args[0]);
+        for (int ii=0; ii < num; ii++) {
+            int [] seqs = null;
+            if (args.length > 2) seqs = new KilimActorRingBenchmark().ringBenchmark();
+            else                 seqs = new KilimActorRingBenchmark.Fork().ringBenchmark();
+            System.out.format("seq: %5d\n",seqs[0]);
+            if (args.length > 1)
+                Thread.sleep(Integer.parseInt(args[1]));
+        }
     }
 
     public static void main(String[] args) throws Exception {

@@ -28,6 +28,7 @@ public class KilimContinuationRingBenchmark implements RingBenchmark {
         private Worker next;
 
         private int sequence;
+        private boolean done;
 
         private Worker(int id, int[] sequences, Queue<Continuation> continuations) {
             this._id = id;
@@ -37,11 +38,15 @@ public class KilimContinuationRingBenchmark implements RingBenchmark {
 
         @Override
         public void execute() throws Pausable {
-            do {
-                Fiber.yield();
+            while (true) {
                 next.sequence = sequence - 1;
-                continuations.add(next);
-            } while (sequence > 0);
+                if (! next.done)
+                    continuations.add(next);
+                if (sequence <= 0)
+                    break;
+                Fiber.yield();
+            }
+            done = true;
             sequences[_id] = sequence;
         }
 
@@ -64,18 +69,13 @@ public class KilimContinuationRingBenchmark implements RingBenchmark {
             workers[workerIndex].next = workers[(workerIndex + 1) % WORKER_COUNT];
         }
 
-        // Start workers.
-        for (Worker worker : workers) {
-            worker.run();
-        }
-
         // Initiate the ring.
         Worker firstWorker = workers[0];
         firstWorker.sequence = MESSAGE_PASSING_COUNT;
         continuations.add(firstWorker);
 
         // Execute scheduled continuations.
-        for (Continuation continuation; (continuation = continuations.pollFirst()) != null;) {
+        for (Continuation continuation; (continuation = continuations.pollFirst()) != null; ) {
             continuation.run();
         }
 
