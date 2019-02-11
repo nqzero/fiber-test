@@ -134,11 +134,26 @@ public class KilimFiberRingBenchmark implements RingBenchmark {
     public int[] ringBenchmark() {
         return context.call();
     }
+    private static void verifyResult(int[] sequences) {
+        int completedWorkerIndex = MESSAGE_PASSING_COUNT % WORKER_COUNT;
+        int workerIndex = completedWorkerIndex;
+        int expectedSequence = 0;
+        do {
+            int actualSequence = sequences[workerIndex];
+            if (expectedSequence != actualSequence)
+                throw new RuntimeException("Ring Mismatch Exception: " + workerIndex);
+            expectedSequence++;
+            workerIndex = (workerIndex - 1 + WORKER_COUNT) % WORKER_COUNT;
+        } while (workerIndex != completedWorkerIndex && expectedSequence <= MESSAGE_PASSING_COUNT);
+    }
 
     @SuppressWarnings("unused")     // entrance for Kilim.run()
     public static void kilimEntrace(String[] ignored) {
         try (KilimFiberRingBenchmark benchmark = new KilimFiberRingBenchmark()) {
-            benchmark.ringBenchmark();
+            for (int ii=0; ii < 50; ii++) {
+                int [] seqs = benchmark.ringBenchmark();
+                verifyResult(seqs);
+            }
         }
     }
 
