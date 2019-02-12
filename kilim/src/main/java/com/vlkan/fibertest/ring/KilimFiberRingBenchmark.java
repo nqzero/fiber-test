@@ -17,6 +17,7 @@ import static com.vlkan.fibertest.ring.RingBenchmarkConfig.THREAD_COUNT;
 import static com.vlkan.fibertest.ring.RingBenchmarkConfig.WORKER_COUNT;
 import java.util.Arrays;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicInteger;
 import kilim.Cell;
 
 /**
@@ -27,12 +28,15 @@ public class KilimFiberRingBenchmark implements RingBenchmark {
     private static final PauseReason PAUSE_REASON = task -> true;
     private enum Completed { INSTANCE }
 
+    static AtomicInteger errorCount = new AtomicInteger();
+    
     private static class Worker extends Task<Integer> {
         private final int _id;
         private final Cell<Completed> completedCell;
         private Worker next;
         private int sequence;
         private int setter;
+        AtomicInteger lock = new AtomicInteger();
 
         private Worker(int id, Cell<Completed> completedCell, Scheduler scheduler) {
             this._id = id;
@@ -40,12 +44,28 @@ public class KilimFiberRingBenchmark implements RingBenchmark {
             setScheduler(scheduler);
         }
 
+        // for locking vs atomic tracking vs vanilla
+        //     ST case, 29s vs 13s vs 11s, 1/50
+        //     MT case, 108s vs 26s vs 21s, 3/71
+        void lock() {
+            if (! lock.compareAndSet(0,1))
+                errorCount.incrementAndGet();
+        }
+        void unlock() {
+            if (! lock.compareAndSet(1,0))
+                errorCount.incrementAndGet();
+        }
+        
         @Override
         public void execute() throws Pausable {
             while (true) {
                 Task.pause(PAUSE_REASON);
+                this.lock();
+                next.lock();
                 next.setter = setter - 1;
+                next.unlock();
                 sequence = setter;
+                this.unlock();
                 if (sequence <= 0) {
                     log("[%2d] completed (sequence=%d)", () -> new Object[] { _id, sequence });
                     completedCell.put(Completed.INSTANCE);
@@ -54,6 +74,13 @@ public class KilimFiberRingBenchmark implements RingBenchmark {
                     next.schedule();
                 }
             }
+        }
+        
+        int get() {
+            lock();
+            int seq = sequence;
+            unlock();
+            return seq;
         }
         void schedule() {
             while (! resume())
@@ -103,7 +130,9 @@ public class KilimFiberRingBenchmark implements RingBenchmark {
         public int[] call() {
             log("initiating ring (MESSAGE_PASSING_COUNT=%d)", MESSAGE_PASSING_COUNT);
             Worker firstWorker = workers[0];
+            firstWorker.lock();
             firstWorker.setter = MESSAGE_PASSING_COUNT;
+            firstWorker.unlock();
             firstWorker.schedule();
 
             log("waiting for completion");
@@ -111,7 +140,7 @@ public class KilimFiberRingBenchmark implements RingBenchmark {
 
             log("collecting sequences");
             for (int workerIndex = 0; workerIndex < WORKER_COUNT; workerIndex++) {
-                sequences[workerIndex] = workers[workerIndex].sequence;
+                sequences[workerIndex] = workers[workerIndex].get();
             }
 
             log("returning collected sequences (sequences=%s)", () -> new Object[] { Arrays.toString(sequences) });
@@ -132,7 +161,10 @@ public class KilimFiberRingBenchmark implements RingBenchmark {
     @Override
     @Benchmark
     public int[] ringBenchmark() {
-        return context.call();
+        int [] seqs = context.call();
+        if (errorCount.get() > 0)
+            throw new RuntimeException("Ring Lock Error: " + errorCount.get());
+        return seqs;
     }
     private static void verifyResult(int[] sequences) {
         int completedWorkerIndex = MESSAGE_PASSING_COUNT % WORKER_COUNT;
@@ -150,9 +182,10 @@ public class KilimFiberRingBenchmark implements RingBenchmark {
     @SuppressWarnings("unused")     // entrance for Kilim.run()
     public static void kilimEntrace(String[] ignored) {
         try (KilimFiberRingBenchmark benchmark = new KilimFiberRingBenchmark()) {
-            for (int ii=0; ii < 50; ii++) {
+            for (int ii=0; ii <= 50; ii++) {
                 int [] seqs = benchmark.ringBenchmark();
-                verifyResult(seqs);
+                if (ii%10==0)
+                    verifyResult(seqs);
             }
         }
     }
